@@ -1,0 +1,71 @@
+#!/bin/sh
+
+# An example hook script to verify what is about to be pushed.  Called by "git
+# push" after it has checked the remote status, but before anything has been
+# pushed.  If this script exits with a non-zero status nothing will be pushed.
+#
+# This hook is called with the following parameters:
+#
+# $1 -- Name of the remote to which the push is being done
+# $2 -- URL to which the push is being done
+#
+# If pushing without using a named remote those arguments will be equal.
+#
+# Information about the commits which are being pushed is supplied as lines to
+# the standard input in the form:
+#
+#   <local ref> <local sha1> <remote ref> <remote sha1>
+#
+# This sample shows how to prevent push of commits where
+# the first line of log message starts with "." or "# ".
+
+remote="$1"
+url="$2"
+
+z40=0000000000000000000000000000000000000000
+
+exceptions=(
+	"153b8a82149440fbbda69effc3692936b4570f33"
+	"ab30275de9f058fdcd2ade1e93408d701d25c174"
+	"1a9457f6a30521657e5d4203b2240227d4616385"
+)
+
+while read local_ref local_sha remote_ref remote_sha
+do
+	if [ "$local_sha" = $z40 ]
+	then
+		# Handle delete
+		:
+	else
+		if [ "$remote_sha" = $z40 ]
+		then
+			# New branch, examine all commits
+			range="$local_sha"
+		else
+			# Update to existing branch, examine new commits
+			range="$remote_sha..$local_sha"
+		fi
+
+		# Check for WIP commit
+		commit=$(git rev-list --format=%s -E --grep='^\.|^# ' "$range" | grep -B 1 -E '^\.|^# ' | awk '/^commit / { print $2 }' | head -n 1)
+		if [ -n "$commit" ]
+		then
+			if [[ $remote_ref != *"/stash/"* ]] && ! (printf '%s\0' "${exceptions[@]}" | grep -Fxqz -- "$commit");
+			then
+				echo >&2 "Push blocked because of stash/temp commit, sha: $commit"
+				exit 1
+			fi
+		fi
+
+		if [ "$(git rev-parse HEAD)" = "$local_sha" ]
+		then
+			if ! git submodule foreach --quiet 'test $(git branch -r --contains $sha1 | wc -l) != 0';
+			then
+				echo >&2 "Not all submodule commits where pushed"
+				exit 1
+			fi
+		fi
+	fi
+done
+
+exit 0
